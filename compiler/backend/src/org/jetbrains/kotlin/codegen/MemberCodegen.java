@@ -89,6 +89,7 @@ public abstract class MemberCodegen<T extends KtPureElement/* TODO: & KtDeclarat
     private NameGenerator inlineNameGenerator;
     private boolean jvmAssertFieldGenerated;
 
+    private boolean alwaysWriteSourceMap;
     private DefaultSourceMapper sourceMapper;
 
     public MemberCodegen(
@@ -108,6 +109,8 @@ public abstract class MemberCodegen<T extends KtPureElement/* TODO: & KtDeclarat
         this.propertyCodegen = new PropertyCodegen(context, v, functionCodegen, this);
         this.parentCodegen = parentCodegen;
         this.jvmAssertFieldGenerated = false;
+        // TODO fix the script runner (shouldn't require a SMAP) & don't write trivial SMAPs to script main classes.
+        this.alwaysWriteSourceMap = this instanceof ScriptCodegen;
     }
 
     protected MemberCodegen(@NotNull MemberCodegen<T> wrapped, T declaration, FieldOwnerContext codegenContext) {
@@ -183,8 +186,8 @@ public abstract class MemberCodegen<T extends KtPureElement/* TODO: & KtDeclarat
 
         writeInnerClasses();
 
-        if (sourceMapper != null) {
-            SourceMapper.Companion.flushToClassBuilder(sourceMapper, v);
+        if (alwaysWriteSourceMap || (sourceMapper != null && !sourceMapper.isTrivial())) {
+            SourceMapper.Companion.flushToClassBuilder(getOrCreateSourceMapper(), v);
         }
 
         v.done();
@@ -726,6 +729,19 @@ public abstract class MemberCodegen<T extends KtPureElement/* TODO: & KtDeclarat
             sourceMapper = new DefaultSourceMapper(SourceInfo.Companion.createInfo((KtElement)element, getClassName()));
         }
         return sourceMapper;
+    }
+
+    protected void initDefaultSourceMappingIfNeeded() {
+        if (state.isInlineDisabled()) return;
+
+        CodegenContext parentContext = context.getParentContext();
+        while (parentContext != null) {
+            if (parentContext.isInlineMethodContext()) {
+                alwaysWriteSourceMap = true;
+                return;
+            }
+            parentContext = parentContext.getParentContext();
+        }
     }
 
     protected void generateConstInstance(@NotNull Type thisAsmType, @NotNull Type fieldAsmType) {
